@@ -11,9 +11,9 @@ import statsmodels.api as sm
 
 os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Cholera Cameroon/Data')
 
-# Administrative SHP file
-adminshapefile_path = "Administrative Boundaries\cmr_admbnda_inc_20180104_SHP\cmr_admbnda_adm1_inc_20180104.shp"
-admin_boundaries = gpd.read_file(adminshapefile_path)
+# Administrative level SHP file
+admin_shp_path = "Administrative Boundaries\cmr_admbnda_inc_20180104_SHP\cmr_admbnda_adm1_inc_20180104.shp"
+admin_boundaries = gpd.read_file(admin_shp_path)
 print("Loaded admin boundaries")
 
 # Use the common column to merge the data
@@ -25,15 +25,16 @@ vulnerability_indicators = []
 capacity_indicators = []
 indicators = []
 
-# Incidence data
+### Incidence data
+##Load data
 incidence_df = pd.read_csv('Regional_Incidence.csv')
-#incidence_df['start_date'] = pd.to_datetime(incidence_df['start_date'])
-#incidence_df['end_date'] = pd.to_datetime(incidence_df['end_date'])
+##summarize all data
 merged_incidence = admin_boundaries.merge(incidence_df, on=common_column, how="left")
 summary_incidence = merged_incidence.groupby(common_column).agg({
     'cases': 'sum',
     'deaths': 'sum',
 }).reset_index()
+##Normalize the data
 normalized_incidence = summary_incidence
 normalized_incidence['cases'] = (summary_incidence['cases'] - summary_incidence['cases'].min()) / (summary_incidence['cases'].max() - summary_incidence['cases'].min())
 normalized_incidence['deaths'] = (summary_incidence['deaths'] - summary_incidence['deaths'].min()) / (summary_incidence['deaths'].max() - summary_incidence['deaths'].min())
@@ -88,7 +89,7 @@ wealth_gdf.crs = "EPSG:4326"
 merged_wealth = gpd.sjoin(wealth_gdf, admin_boundaries, how="left", op="within")
 mean_wealth = merged_wealth.groupby(common_column)["rwi"].mean().reset_index()
 scaled_poverty = mean_wealth
-scaled_poverty['rwi'] = -1*((mean_wealth['rwi'] + 1) / 2)
+scaled_poverty['rwi'] = (((-1*mean_wealth['rwi']) + 1) / 2)
 scaled_poverty.rename(columns={'rwi': 'Poverty'}, inplace=True)
 vulnerability_indicators.append(scaled_poverty)
 print("Collected poverty")
