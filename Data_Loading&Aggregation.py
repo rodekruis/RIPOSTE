@@ -23,13 +23,14 @@ from sklearn.cluster import KMeans
 # Set working directory
 os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Cholera Cameroon/Data')
 
+# Determine spatial resolution and set the common column to merge the data spatially
+common_column = "ADM1_FR"
+
 # Administrative level SHP file
 admin_shp_path = "Administrative Boundaries\cmr_admbnda_inc_20180104_SHP\cmr_admbnda_adm1_inc_20180104.shp"
-admin_boundaries = gpd.read_file(admin_shp_path)
+full_admin_boundaries = gpd.read_file(admin_shp_path)
+admin_boundaries = full_admin_boundaries[[common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
 print("Loaded admin boundaries")
-
-# Use the common column to merge the data spatially
-common_column = "ADM1_FR"
 
 # Create master dataframe to store all the datasets
 index_columns = [common_column, 'start_date', 'end_date']
@@ -41,6 +42,7 @@ def add_dataframe_to_master(dataframe):
     # Add all the individual dataframes to the master dataframe
     global master_df
     master_df = pd.merge(master_df, dataframe, on=index_columns, how='outer')
+
 def gee_extraction(imageset, band):
     image_collection = ee.ImageCollection(imageset)
     # Convert the shapefile to a GeoJSON FeatureCollection
@@ -142,6 +144,48 @@ temperature_df = pd.read_csv('skin_temperature.csv')
 add_dataframe_to_master(temperature_df)
 print("Collected surface temperature")
 
+### Floods (...)
+# Access GLOFAS data...
+
+### Droughts (...)
+# Access ...
+
+### Population Density (TIFF) - using point data from Meta, could also use excel sheet from MinSanté which has all admin levels
+# Load data
+src = rasterio.open('Datasets_Directory/cmr_density_2020.tif')
+# Loop through admin areas and extract all values from the tif to be summed
+total_pop_density = []
+for index, row in admin_boundaries.iterrows():
+    geom = row['geometry']
+    out_image, out_transform = mask(src, [geom], crop=True)
+    sum_value = np.nansum(out_image)
+    total_pop_density.append({common_column: row['ADM1_FR'], 'Pop_Density': sum_value})
+    pop_density = pd.DataFrame(total_pop_density)
+# Align to desired temporal resolution
+pop_density_df = copy_temporal_resolution(pop_density)
+# Add to master dataframe
+add_dataframe_to_master(pop_density_df)
+print("Collected population density")
+
+### Number of displaced people ...
+
+### Proximity to water bodies (TIFF)
+# Load data
+src = rasterio.open('Datasets_Directory/WaterBodies.tif')
+# Loop through admin areas and extract all values from the tif to be summed
+total_waterbodies = []
+for index, row in admin_boundaries.iterrows():
+    geom = row['geometry']
+    out_image, out_transform = mask(src, [geom], crop=True)
+    sum_value = np.nansum(out_image)
+    total_waterbodies.append({common_column: row['ADM1_FR'], 'Water_Bodies': sum_value})
+    waterbodies = pd.DataFrame(total_waterbodies)
+# Align to desired temporal resolution
+waterbodies_df = copy_temporal_resolution(waterbodies)
+# Add to master dataframe
+add_dataframe_to_master(waterbodies_df)
+print("Collected water bodies")
+
 ### Poverty(CSV)
 # Load data
 wealth_df = pd.read_csv('Datasets_Directory/Relative_wealth_index.csv')
@@ -150,7 +194,7 @@ geometry = [Point(xy) for xy in zip(wealth_df.longitude, wealth_df.latitude)]
 # Format to geodataframe
 wealth_gdf = gpd.GeoDataFrame(wealth_df, geometry=geometry)
 wealth_gdf.crs = "EPSG:4326"
-# Complete spaital join with admin boundaries shapefile
+# Complete spatial join with admin boundaries shapefile
 merged_wealth = gpd.sjoin(wealth_gdf, admin_boundaries, how="left", op="within")
 # Group by admin boundaries name column
 mean_wealth = merged_wealth.groupby(common_column)["rwi"].mean().reset_index()
@@ -164,7 +208,43 @@ poverty_df = copy_temporal_resolution(poverty)
 add_dataframe_to_master(poverty_df)
 print("Collected poverty")
 
-# Hazards (CSV)
+### Demography(CSV)
+# Load data
+demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
+# Group by admin level and calculate the sum of each group
+extracted_demographies = demography_df.groupby('Région').agg({
+    'Population 2023 estimée (Les deux sexes)': 'sum',
+    'enfants 0-59 mois': 'sum',
+    'Femmes enceintes attendues': 'sum',
+    '50 ans et plus Masculin': 'sum',
+    '50 ans et plus Féminin': 'sum'
+}).reset_index()
+extracted_demographies['Percentage_Children_under_5'] = (extracted_demographies['enfants 0-59 mois']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+extracted_demographies['Percentage_Adults_over_50'] = ((extracted_demographies['50 ans et plus Masculin']+extracted_demographies['50 ans et plus Féminin'])/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+extracted_demographies['Percentage_Pregnant_Women'] = (extracted_demographies['Femmes enceintes attendues']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+extracted_demographies['Région'] = extracted_demographies['Région'].str.title()
+# Merge on admin boundaries
+extracted_demographies.rename(columns={'Région': 'ADM1_FR'}, inplace=True)
+merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
+target_demography = merged_demographies[['ADM1_FR', 'Percentage_Children_under_5', 'Percentage_Adults_over_50', 'Percentage_Pregnant_Women']]
+# Align to desired temporal resolution
+vulnerable_demographies_df = copy_temporal_resolution(target_demography)
+# Add to master dataframe
+add_dataframe_to_master(vulnerable_demographies_df)
+print("Collected demography")
+
+### Household Size (CSV)
+hh_size = pd.read_csv('Datasets_Directory/hh_size.csv')
+merged_hh = admin_boundaries.merge(hh_size, on=common_column, how="left")
+# Align to desired temporal resolution
+hh_size_df = copy_temporal_resolution(merged_hh)
+# Add to master dataframe
+add_dataframe_to_master(hh_size_df)
+print("Collected average household size")
+
+### Education level ...
+
+### Hazards (CSV)
 disasters_df = pd.read_csv('Datasets_Directory/Climate-relatedDisasters.csv')
 merged_disasters = admin_boundaries.merge(disasters_df, on=common_column, how="left")
 merged_disasters.rename(columns={'Average': 'Hazards'}, inplace=True)
@@ -208,6 +288,18 @@ hcf_df = copy_temporal_resolution(HCF)
 add_dataframe_to_master(hcf_df)
 print("Collected HCF")
 
+### Public health training (CSV)
+ph_training = pd.read_csv('Datasets_Directory/formations_sanitaires.csv')
+merged_ph_training = admin_boundaries.merge(ph_training, on=common_column, how="left")
+# Define only the 2 columns needed in dataframe
+ph_training_clean = merged_ph_training[['ADM1_FR', 'FOSA/1000_hab.']]
+# Align to desired temporal resolution
+ph_training_df = copy_temporal_resolution(ph_training_clean)
+# Add to master dataframe
+add_dataframe_to_master(ph_training_df)
+print("Collected public health training")
+
+
 #################### Finished collecting datasets #######################
 print(master_df)
 print("Merged dataframes")
@@ -228,7 +320,7 @@ print("Merged dataframes")
 
 ## Plots of indicators vs incidence
 # Get the number of unique y datasets
-unique_datasets = [col for col in master_df.columns if col not in index_columns]
+unique_datasets = [col for col in master_df.columns if col not in ['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
 # Calculate the number of rows and columns for subplots
 num_rows = len(unique_datasets) // 3 + (len(unique_datasets) % 3 > 0)
 num_cols = min(len(unique_datasets), 3)
@@ -282,15 +374,18 @@ plt.show()
 # print("Outliers removed")
 
 ################### Normalize df of indicators ######################
-# NB: Currently not setting fixed min and max values for any dataset, this might need to be changed. Also nromalization might need to be done per region or time period.
+# NB: Currently not setting fixed min and max values for any dataset, this might need to be changed. Also normalization might need to be done per region or time period.
 normalized_df = master_df
-for dataset in [col for col in master_df.columns if col not in index_columns]:
+for dataset in [col for col in master_df.columns if col not in ['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]:
   normalized_df = normalize_minmax(master_df, dataset)
+# Inverse datasets that were not initially indexes and are not yet with the negative influence being the highest value
+normalized_df['FOSA/1000_hab.'] = (10 - normalized_df['FOSA/1000_hab.'])
+normalized_df.rename(columns={'FOSA/1000_hab.': 'Lack_of_PH_Training'}, inplace=True)
 print(normalized_df)
 print("Datasets normalized")
 
 #################### Complete multi linear regression ##########################
-normalized_df_no_id = normalized_df.drop(columns=index_columns)
+normalized_df_no_id = normalized_df.drop(columns=['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry'])
 reg = LinearRegression()
 res = reg.fit(normalized_df_no_id,incidence['cases'])
 print(f"Regression coefficients: {reg.coef_}")
@@ -309,9 +404,9 @@ print(time_aggregated_df)
 ## Combine the datasets into values per dimension
 # Define the dimensions
 dimensions = {
-    'Hazard and Exposure': ['total_precipitation_sum', 'skin_temperature', 'Hazards'],
-    'Vulnerability': ['Poverty', 'Conflicts'],
-    'Lack of Coping Capacity': ['Insufficient_WASH', 'Pop_HCFs'],
+    'Hazard and Exposure': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies'],
+    'Vulnerability': ['Poverty', 'Percentage_Children_under_5', 'Percentage_Adults_over_50', 'Percentage_Pregnant_Women', 'Conflicts', 'Avg_HH_size'],
+    'Lack of Coping Capacity': ['Pop_HCFs', 'Lack_of_PH_Training'],
     'Risk': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Poverty', 'Conflicts', 'Insufficient_WASH', 'Pop_HCFs']
 }
 # Create empty dataframe for the dimension means
