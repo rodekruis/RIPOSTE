@@ -47,7 +47,7 @@ def gee_extraction(imageset, band):
     image_collection = ee.ImageCollection(imageset)
     # Convert the shapefile to a GeoJSON FeatureCollection
     fc = ee.FeatureCollection(admin_boundaries.__geo_interface__)
-    # Create an empyt list for all the results to be appended to inside the for loop
+    # Create an empty list for all the results to be appended to inside the for loop
     results = []
     # Loop through spatial resolution dates
     for index, row in time_periods.iterrows():
@@ -135,6 +135,18 @@ precipitation_df = pd.read_csv('total_precipitation_sum.csv')
 add_dataframe_to_master(precipitation_df)
 print("Collected precipitation")
 
+# # Create a time series plot for each region
+# regions = precipitation_df['ADM1_FR'].unique()
+# for region in regions:
+#     region_data = precipitation_df[precipitation_df['ADM1_FR'] == region]
+#     plt.plot(region_data['start_date'], region_data['total_precipitation_sum'], label=region)
+#
+# plt.xlabel('Date')
+# plt.ylabel('Precipitation')
+# plt.title('Precipitation Time Series by Region')
+# plt.legend()
+# plt.show()
+
 ### Temperature (GEE)
 # Extract data from GEE
 # temperature_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'skin_temperature')
@@ -144,22 +156,34 @@ temperature_df = pd.read_csv('skin_temperature.csv')
 add_dataframe_to_master(temperature_df)
 print("Collected surface temperature")
 
+# # Create a time series plot for each region
+# regions = temperature_df['ADM1_FR'].unique()
+# for region in regions:
+#     region_data = temperature_df[temperature_df['ADM1_FR'] == region]
+#     plt.plot(region_data['start_date'], region_data['skin_temperature'], label=region)
+#
+# plt.xlabel('Date')
+# plt.ylabel('Temperature')
+# plt.title('Temperature Time Series by Region')
+# plt.legend()
+# plt.show()
+
 ### Floods (...)
 # Access GLOFAS data...
 
 ### Droughts (...)
 # Access ...
 
-### Population Density (TIFF) - using point data from Meta, could also use excel sheet from MinSanté which has all admin levels
+### Population Density (TIFF) - using point data from Meta (avg # of people per 30-meter grid tile in an amdin boundary); NB: could also use excel sheet from MinSanté which has all admin levels
 # Load data
 src = rasterio.open('Datasets_Directory/cmr_density_2020.tif')
-# Loop through admin areas and extract all values from the tif to be summed
+# Loop through admin areas and extract all values from the tif
 total_pop_density = []
 for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
     out_image, out_transform = mask(src, [geom], crop=True)
-    sum_value = np.nansum(out_image)
-    total_pop_density.append({common_column: row['ADM1_FR'], 'Pop_Density': sum_value})
+    mean_value = np.nanmean(out_image)
+    total_pop_density.append({common_column: row['ADM1_FR'], 'Pop_Density': mean_value})
     pop_density = pd.DataFrame(total_pop_density)
 # Align to desired temporal resolution
 pop_density_df = copy_temporal_resolution(pop_density)
@@ -172,13 +196,13 @@ print("Collected population density")
 ### Proximity to water bodies (TIFF)
 # Load data
 src = rasterio.open('Datasets_Directory/WaterBodies.tif')
-# Loop through admin areas and extract all values from the tif to be summed
+# Loop through admin areas and extract all values from the tif
 total_waterbodies = []
 for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
     out_image, out_transform = mask(src, [geom], crop=True)
-    sum_value = np.nansum(out_image)
-    total_waterbodies.append({common_column: row['ADM1_FR'], 'Water_Bodies': sum_value})
+    mean_value = np.nanmean(out_image)
+    total_waterbodies.append({common_column: row['ADM1_FR'], 'Water_Bodies': mean_value})
     waterbodies = pd.DataFrame(total_waterbodies)
 # Align to desired temporal resolution
 waterbodies_df = copy_temporal_resolution(waterbodies)
@@ -277,7 +301,7 @@ wash_df = copy_temporal_resolution(WASH)
 add_dataframe_to_master(wash_df)
 print("Collected WASH")
 
-# Health Care Facilities (CSV)
+### Health Care Facilities (CSV)
 HCF_df = pd.read_csv('Datasets_Directory/HCF.csv')
 merged_HCF = admin_boundaries.merge(HCF_df, on=common_column, how="left")
 # Define only the 2 columns needed in dataframe
@@ -287,6 +311,49 @@ hcf_df = copy_temporal_resolution(HCF)
 # Add to master dataframe
 add_dataframe_to_master(hcf_df)
 print("Collected HCF")
+
+### People per nearest HCF (TIFF & SHP) - more accurate alternative to excel used above but still not working correctly
+# # Load the healthcare facility shapefile into a GeoDataFrame
+# healthcare_gdf = gpd.read_file('Datasets_Directory/hcf_osm.shp')
+# # Open the population TIFF file
+# with rasterio.open('Datasets_Directory/cmr_density_2020.tif') as src:
+#     # Read the population data as a numpy array
+#     population_data = src.read(1)
+#     # Get the geospatial transform to convert pixel coordinates to geographic coordinates
+#     transform = src.transform
+# # Create a list to store the healthcare facility types
+# facility_types = ['hospital', 'clinic', 'pharmacy', 'doctors']
+# # Create a DataFrame to store the average population per facility type and region
+# HCF_accessibility_df = pd.DataFrame(columns= [common_column] + [f'average #people/{facility}' for facility in facility_types])
+# # Iterate through admin boundaries
+# for idx, admin_polygon in admin_boundaries.iterrows():
+#     region_name = admin_polygon[common_column]
+#     # Initialize a dictionary to store the population counts for each facility type
+#     population_counts = {facility_type: 0 for facility_type in facility_types}
+#     # Iterate through each pixel in the population data
+#     for x, y in np.ndindex(population_data.shape):
+#         pixel_value = population_data[y, x]
+#         point = admin_polygon['geometry'].representative_point()  # Use a representative point for the admin polygon
+#         # Find the closest healthcare facility and its type
+#         min_distance = float('inf')
+#         closest_facility_type = None
+#         for facility_type in facility_types:
+#             type_gdf = healthcare_gdf[healthcare_gdf['amenity'] == facility_type]
+#             distances = type_gdf.distance(point)
+#             closest_distance = distances.min()
+#             if closest_distance < min_distance:
+#                 min_distance = closest_distance
+#                 closest_facility_type = facility_type
+#         # Add the population to the respective facility type
+#         population_counts[closest_facility_type] += pixel_value
+#     # Calculate the average population per facility type for this region
+#     avg_population_per_type = {key: value / np.count_nonzero(population_data) for key, value in population_counts.items()}
+#     # Add the region and average population data to the result DataFrame
+#     row_data = {'Region': region_name}
+#     row_data.update(avg_population_per_type)
+#     HCF_accessibility_df = HCF_accessibility_df.append(row_data, ignore_index=True)
+# # Print or export the resulting DataFrame
+# print(HCF_accessibility_df)
 
 ### Public health training (CSV)
 ph_training = pd.read_csv('Datasets_Directory/formations_sanitaires.csv')
@@ -302,6 +369,9 @@ print("Collected public health training")
 
 #################### Finished collecting datasets #######################
 print(master_df)
+# Print the final dataframe to a CSV without an additional row for the admin level geometries
+master_to_csv = master_df.drop(columns='geometry')
+master_to_csv.to_csv('complete_dataset_df.csv', index=False)
 print("Merged dataframes")
 
 ################### Depict data on graphs #####################
@@ -407,7 +477,7 @@ dimensions = {
     'Hazard and Exposure': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies'],
     'Vulnerability': ['Poverty', 'Percentage_Children_under_5', 'Percentage_Adults_over_50', 'Percentage_Pregnant_Women', 'Conflicts', 'Avg_HH_size'],
     'Lack of Coping Capacity': ['Pop_HCFs', 'Lack_of_PH_Training'],
-    'Risk': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Poverty', 'Conflicts', 'Insufficient_WASH', 'Pop_HCFs']
+    'Risk': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies', 'Poverty', 'Percentage_Children_under_5', 'Percentage_Adults_over_50', 'Percentage_Pregnant_Women', 'Conflicts', 'Avg_HH_size', 'Pop_HCFs', 'Lack_of_PH_Training']
 }
 # Create empty dataframe for the dimension means
 dimension_aggregated_df = pd.DataFrame()
