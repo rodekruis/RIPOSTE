@@ -8,10 +8,10 @@ The script is currently filled with data for creating a risk map for cholera in 
 
 Table of Contents:
 
-Definitions
-Data Loading
-Data Merging
-Data Normalization
-Aggregation
-Risk Map Creation
-Predictive modelling
+1. Definitions
+2. Data Loading
+3. Data Merging
+4. Data Normalization
+5. Aggregation
+6. Risk Map Creation
+7. Predictive modelling
