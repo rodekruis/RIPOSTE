@@ -7,17 +7,9 @@ import matplotlib.patches as mpatches
 import rasterio
 from rasterio.mask import mask
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from shapely.geometry import Point
-import statsmodels.api as sm
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.svm import SVR
-from sklearn.neighbors import KNeighborsRegressor
-
 
 ########################## Definitions ########################
 # # Log into Google Earth Engine
@@ -30,11 +22,11 @@ os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipat
 # Set spatial resolution and set the common column to merge the data spatially
 common_column = "ADM1_FR"
 
-# Set temporal resolution in days
-temporal = "yearly"
-temp_res = relativedelta(years=1)
-study_start = datetime(2021, 1, 1)
-study_end = datetime(2023, 12, 31)
+# Set temporal resolution
+temporal = "monthly"
+temp_res = relativedelta(months=1)
+study_start = datetime(2021, 10, 1)
+study_end = datetime(2023, 10, 1)
 start_dates = []
 end_dates = []
 current_date = study_start
@@ -122,18 +114,12 @@ def copy_temporal_resolution(df):
 
 def normalize_minmax(df, column, min=None, max=None):
     normalized_df = df
-    if min is None and max is None:
-        normalized_df[column] = ((df[column] - df[column].min()) / (df[column].max() - df[column].min()))*10
-        # print("both are none")
-    elif min is None:
-        normalized_df[column] = ((df[column] - df[column].min()) / (max - df[column].min()))*10
-        # print("min is none")
-    elif max is None:
-        normalized_df[column] = ((df[column] - min) / (df[column].max() - min))*10
-        # print("max is none")
-    else:
-        normalized_df[column] = ((df[column] - min) / (max - min))*10
-        # print("both defined")
+    if min is None:
+        min = df[column].min()
+    if max is None:
+        max = df[column].max()
+
+    normalized_df[column] = ((df[column] - min) / (max - min)) * 10
     return normalized_df
 
 def inform_class_thresholds(value, thresholds):
@@ -164,6 +150,12 @@ for _, period in time_periods.iterrows():
             total_deaths = subset['deaths'].sum()
             temp_aggregated_data.append({'start_date': start_date, 'end_date': end_date, 'ADM1_FR': region,'cases': total_cases, 'deaths': total_deaths})
 temp_aggregated_incidence = pd.DataFrame(temp_aggregated_data)
+# Calculate attack rate = (Number of cases/population size)*100
+demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
+extracted_demographies = demography_df.groupby('Région').agg({'Population 2023 estimée (Les deux sexes)': 'sum'}).reset_index()
+temp_aggregated_incidence['Attack Rate'] = 0.0  # Initialize the column with zeros
+condition = temp_aggregated_incidence['cases'] != 0
+temp_aggregated_incidence.loc[condition, 'Attack Rate'] = (temp_aggregated_incidence['cases'] / extracted_demographies['Population 2023 estimée (Les deux sexes)']) * 100
 # Add to master dataframe
 add_dataframe_to_master(temp_aggregated_incidence)
 print("Collected incidence")
@@ -358,8 +350,17 @@ print("Collected public health training")
 
 
 #################### Finished collecting datasets #######################
-print(master_df)
+#Remove time periods that are missing values
+print(master_df[['start_date', 'end_date', common_column, 'cases', 'Avg_HH_size']])
+print('columns with nan')
+print(master_df.columns[master_df.isna().any()].tolist())
+print('rows with nan')
+print(master_df[master_df['cases'].isna()])
+master_df = master_df.dropna(how='any')
+
+
 # Print the final dataframe to a CSV without an additional row for the admin level geometries
+print(master_df[['start_date', 'end_date', common_column, 'cases', 'Avg_HH_size']])
 master_to_csv = master_df.drop(columns='geometry')
 master_to_csv.to_csv('complete_dataset_df_'+temporal+'.csv', index=False)
 print("Merged dataframes")
@@ -397,10 +398,10 @@ for i, dataset in enumerate(unique_datasets):
     # Create the best-fit line equation
     line_equation = f'Best-fit Line: y = {slope:.2f}x + {intercept:.2f}'
     # Plot the best-fit line
-    ax.plot(master_df['cases'], slope * master_df['cases'] + intercept, color='red', linestyle='--',
+    ax.plot(master_df['Attack Rate'], slope * master_df['Attack Rate'] + intercept, color='red', linestyle='--',
             label=line_equation)
-    ax.set_title(f'Scatter Plot for Cases vs {dataset}')
-    ax.set_xlabel('cases')
+    ax.set_title(f'Scatter Plot for Attack Rate vs {dataset}')
+    ax.set_xlabel('Attack Rate')
     ax.set_ylabel(dataset)
     ax.legend(loc='upper left')
     ax.grid(True)
@@ -420,63 +421,6 @@ normalized_df['FOSA/1000_hab.'] = (10 - normalized_df['FOSA/1000_hab.'])
 normalized_df.rename(columns={'FOSA/1000_hab.': 'Lack_of_PH_Training'}, inplace=True)
 print("Datasets normalized")
 
-#################### Complete multi linear regression ##########################
-normalized_df_no_id = normalized_df.drop(columns=['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry'])
-normalized_df_y = normalized_df_no_id.drop('cases', axis=1).drop('deaths', axis=1)
-reg = LinearRegression()
-res = reg.fit(normalized_df_y,temp_aggregated_incidence['cases'])
-print(f"Regression coefficients: {reg.coef_}")
-
-est = sm.OLS(temp_aggregated_incidence['cases'], normalized_df_y)
-est2 = est.fit()
-print(est2.summary())
-
-#################### Machine Learning Model Comparison ##########################
-# Define features and target variable
-X = normalized_df_no_id.drop('cases', axis=1).drop('deaths', axis=1)
-y = temp_aggregated_incidence['cases']
-
-# Split the data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Define a list of regression models to compare
-models = {
-    'Random Forest Regressor': RandomForestRegressor(),
-    'Linear Regression': LinearRegression(),
-    'Support Vector Regressor': SVR(),
-    'K-Nearest Neighbors Regressor': KNeighborsRegressor()
-}
-
-# Dictionary to store model performance metrics
-model_metrics = {}
-
-# Iterate over each model and evaluate its performance
-for model_name, model in models.items():
-    # Train the model
-    model.fit(X_train, y_train)
-
-    # Make predictions
-    y_pred = model.predict(X_test)
-
-    # Evaluate the model using different regression metrics
-    mse = mean_squared_error(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-
-    # Store the metrics in the dictionary
-    model_metrics[model_name] = {
-        'Mean Squared Error (MSE)': mse,
-        'Mean Absolute Error (MAE)': mae,
-        'R-squared (R2)': r2
-    }
-
-# Compare the model performances
-for model_name, metrics in model_metrics.items():
-    print(f"Model: {model_name}")
-    for metric, value in metrics.items():
-        print(f"{metric}: {value:.2f}")
-    print()
-
 ##################### Aggregation #########################
 ## Combine all the incidence data for each admin level
 # Only find the mean of numeric columns
@@ -485,6 +429,7 @@ numeric_columns = normalized_df.select_dtypes(include=['number']).columns.tolist
 normalized_df[common_column] = pd.Categorical(normalized_df[common_column], categories=normalized_df[common_column].unique(), ordered=True)
 # Find the mean per admin level
 time_aggregated_df = normalized_df.groupby(common_column)[numeric_columns].mean()
+print(time_aggregated_df)
 ## Combine the datasets into values per dimension
 # Define the dimensions
 dimensions = {
@@ -510,6 +455,7 @@ print("Created risk scores")
 ##################### Draw the risk maps ########################
 # Merge the shapefile GeoDataFrame with the cluster labels DataFrame based on the 'Country' column
 merged_gdf = admin_boundaries.merge(dimension_aggregated_df, on=common_column)
+merged_time_gdf = admin_boundaries.merge(time_aggregated_df, on=common_column)
 # Define the risk categories
 category_labels = ["Very low", "Low", "Medium", "High","Very high"]
 category_colors = [(1.0, 0.9607843137254902, 0.9411764705882353, 1.0),
@@ -532,11 +478,7 @@ for i, dimension in enumerate(dimension_aggregated_df.columns):
     ax = axs[i]
     colormap = plt.cm.colors.ListedColormap(category_colors)
     thresholds = dimension_thresholds.get(dimension, [0])
-    print(thresholds)
-    print(merged_gdf[dimension])
-    print(dimension_aggregated_df[dimension])
     merged_gdf[dimension + '_Category'] = merged_gdf[dimension].apply(lambda x: inform_class_thresholds(x, thresholds))
-    print(merged_gdf[dimension + '_Category'])
     # Use the 'dimension_Category' values to map to colors using the colormap
     norm = plt.Normalize(vmin=0, vmax=len(category_labels) - 1)
     merged_gdf['Color'] = merged_gdf[dimension + '_Category'].apply(lambda x: norm(category_labels.index(x)))
@@ -555,4 +497,16 @@ for idx, row in merged_gdf.iterrows():
 legend_labels = [mpatches.Patch(color=color, label=label) for color, label in zip(category_colors, category_labels)]
 fig.legend(handles=legend_labels, title='Risk Level', loc='upper right')
 # Show the maps
+plt.show()
+
+# Create scatter plot between risk score and incidence rate
+for region in master_df['ADM1_FR'].unique():
+    region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
+    region_risk = merged_gdf[merged_gdf[common_column] == region]['Risk']
+    plt.scatter(region_risk, region_incidence, label=region, s=50)
+
+plt.xlabel('INFORM Risk Level')
+plt.ylabel('Cholera Attack Rate')
+plt.title('Correlation between risk level and cholera incidence')
+plt.legend()
 plt.show()
