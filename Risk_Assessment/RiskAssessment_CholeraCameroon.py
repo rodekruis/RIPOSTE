@@ -112,6 +112,13 @@ def copy_temporal_resolution(df):
     return final_df
     print("Copied temporal resolution across df")
 
+def normalize_by_pop(df, desired_column, column_to_normalize):
+    demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
+    extracted_demographies = demography_df.groupby('Région').agg({'Population 2023 estimée (Les deux sexes)': 'sum'}).reset_index()
+    df[desired_column] = 0.0  # Initialize the column with zeros
+    condition = df[column_to_normalize] != 0
+    df.loc[condition, desired_column] = (df[column_to_normalize] / extracted_demographies['Population 2023 estimée (Les deux sexes)']) * 100
+
 def normalize_minmax(df, column, min=None, max=None):
     normalized_df = df
     if min is None:
@@ -136,7 +143,7 @@ def inform_class_thresholds(value, thresholds):
 incidence_df = pd.read_csv('Regional_Incidence.csv')
 # Merge incidence data with spatial data (admin boundaries)
 summary_incidence = admin_boundaries.merge(incidence_df, on=common_column, how="left")
-incidence = summary_incidence[['start_date', 'end_date', 'ADM1_FR', 'cases', 'deaths']]
+incidence = summary_incidence[['start_date', 'end_date', common_column, 'cases', 'deaths']]
 # Aggregate the data temporally
 temp_aggregated_data = []
 for _, period in time_periods.iterrows():
@@ -148,14 +155,10 @@ for _, period in time_periods.iterrows():
         if not subset.empty:
             total_cases = subset['cases'].sum()
             total_deaths = subset['deaths'].sum()
-            temp_aggregated_data.append({'start_date': start_date, 'end_date': end_date, 'ADM1_FR': region,'cases': total_cases, 'deaths': total_deaths})
+            temp_aggregated_data.append({'start_date': start_date, 'end_date': end_date, common_column: region,'cases': total_cases, 'deaths': total_deaths})
 temp_aggregated_incidence = pd.DataFrame(temp_aggregated_data)
 # Calculate attack rate = (Number of cases/population size)*100
-demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
-extracted_demographies = demography_df.groupby('Région').agg({'Population 2023 estimée (Les deux sexes)': 'sum'}).reset_index()
-temp_aggregated_incidence['Attack Rate'] = 0.0  # Initialize the column with zeros
-condition = temp_aggregated_incidence['cases'] != 0
-temp_aggregated_incidence.loc[condition, 'Attack Rate'] = (temp_aggregated_incidence['cases'] / extracted_demographies['Population 2023 estimée (Les deux sexes)']) * 100
+normalize_by_pop(temp_aggregated_incidence, 'Attack Rate', 'cases')
 # Add to master dataframe
 add_dataframe_to_master(temp_aggregated_incidence)
 print("Collected incidence")
@@ -211,7 +214,7 @@ for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
     out_image, out_transform = mask(src, [geom], crop=True)
     mean_value = np.nanmean(out_image)
-    total_pop_density.append({common_column: row['ADM1_FR'], 'Pop_Density': mean_value})
+    total_pop_density.append({common_column: row[common_column], 'Pop_Density': mean_value})
     pop_density = pd.DataFrame(total_pop_density)
 # Align to desired temporal resolution
 pop_density_df = copy_temporal_resolution(pop_density)
@@ -261,23 +264,29 @@ print("Collected poverty")
 ### Demography(CSV)
 # Load data
 demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
+demography_df.rename(columns={'Région': common_column}, inplace=True)
 # Group by admin level and calculate the sum of each group
-extracted_demographies = demography_df.groupby('Région').agg({
+extracted_demographies = demography_df.groupby(common_column).agg({
     'Population 2023 estimée (Les deux sexes)': 'sum',
     'enfants 0-59 mois': 'sum',
     'Femmes enceintes attendues': 'sum',
     '50 ans et plus Masculin': 'sum',
     '50 ans et plus Féminin': 'sum'
 }).reset_index()
-extracted_demographies['Percentage_Children_under_5'] = (extracted_demographies['enfants 0-59 mois']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
-extracted_demographies['Percentage_Adults_over_50'] = ((extracted_demographies['50 ans et plus Masculin']+extracted_demographies['50 ans et plus Féminin'])/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
-extracted_demographies['Percentage_Pregnant_Women'] = (extracted_demographies['Femmes enceintes attendues']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
-extracted_demographies['Région'] = extracted_demographies['Région'].str.title()
+# extracted_demographies['Région'] = extracted_demographies['Région'].str.title() might still be need
 # Merge on admin boundaries
-extracted_demographies.rename(columns={'Région': 'ADM1_FR'}, inplace=True)
 merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
-merged_demographies['Avg_Percentage_Vulnerable_Population'] = (merged_demographies['Percentage_Children_under_5']+merged_demographies['Percentage_Adults_over_50']+merged_demographies['Percentage_Pregnant_Women'])/3
-target_demography = merged_demographies[['ADM1_FR', 'Avg_Percentage_Vulnerable_Population']]
+merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['enfants 0-59 mois']+merged_demographies['Femmes enceintes attendues']+merged_demographies['50 ans et plus Masculin']+merged_demographies['50 ans et plus Féminin'])
+normalize_by_pop(merged_demographies, 'Percentage_Vulnerable_Population', 'Tot_Vulnerable_Population')
+target_demography = merged_demographies[[common_column, 'Percentage_Vulnerable_Population']]
+# extracted_demographies['Percentage_Children_under_5'] = (extracted_demographies['enfants 0-59 mois']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+# extracted_demographies['Percentage_Adults_over_50'] = ((extracted_demographies['50 ans et plus Masculin']+extracted_demographies['50 ans et plus Féminin'])/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+# extracted_demographies['Percentage_Pregnant_Women'] = (extracted_demographies['Femmes enceintes attendues']/extracted_demographies['Population 2023 estimée (Les deux sexes)'])*100
+# extracted_demographies['Région'] = extracted_demographies['Région'].str.title()
+# # Merge on admin boundaries
+# merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
+# merged_demographies['Avg_Percentage_Vulnerable_Population'] = (merged_demographies['Percentage_Children_under_5']+merged_demographies['Percentage_Adults_over_50']+merged_demographies['Percentage_Pregnant_Women'])/3
+# target_demography = merged_demographies[['ADM1_FR', 'Avg_Percentage_Vulnerable_Population']]
 # Align to desired temporal resolution
 vulnerable_demographies_df = copy_temporal_resolution(target_demography)
 # Add to master dataframe
@@ -351,13 +360,7 @@ print("Collected public health training")
 
 #################### Finished collecting datasets #######################
 #Remove time periods that are missing values
-print(master_df[['start_date', 'end_date', common_column, 'cases', 'Avg_HH_size']])
-print('columns with nan')
-print(master_df.columns[master_df.isna().any()].tolist())
-print('rows with nan')
-print(master_df[master_df['cases'].isna()])
 master_df = master_df.dropna(how='any')
-
 
 # Print the final dataframe to a CSV without an additional row for the admin level geometries
 print(master_df[['start_date', 'end_date', common_column, 'cases', 'Avg_HH_size']])
@@ -391,9 +394,9 @@ fig, axs = plt.subplots(num_rows, num_cols, figsize=(16, 12))
 for i, dataset in enumerate(unique_datasets):
     row, col = divmod(i, num_cols)
     ax = axs[row, col]
-    ax.scatter(master_df['cases'], master_df[dataset], marker='o', label='Data')
+    ax.scatter(master_df['Attack Rate'], master_df[dataset], marker='o', label='Data')
     # Calculate the coefficients of the best-fit line
-    coefficients = np.polyfit(master_df['cases'], master_df[dataset], 1)
+    coefficients = np.polyfit(master_df['Attack Rate'], master_df[dataset], 1)
     slope, intercept = coefficients
     # Create the best-fit line equation
     line_equation = f'Best-fit Line: y = {slope:.2f}x + {intercept:.2f}'
@@ -434,9 +437,9 @@ print(time_aggregated_df)
 # Define the dimensions
 dimensions = {
     'Hazard and Exposure': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies'],
-    'Vulnerability': ['Poverty', 'Avg_Percentage_Vulnerable_Population', 'Conflicts', 'Avg_HH_size'],
+    'Vulnerability': ['Poverty', 'ercentage_Vulnerable_Population', 'Conflicts', 'Avg_HH_size'],
     'Lack of Coping Capacity': ['Pop_HCFs', 'Lack_of_PH_Training'],
-    'Risk': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies', 'Poverty', 'Avg_Percentage_Vulnerable_Population', 'Conflicts', 'Avg_HH_size', 'Pop_HCFs', 'Lack_of_PH_Training']
+    'Risk': ['total_precipitation_sum', 'skin_temperature', 'Hazards', 'Insufficient_WASH', 'Pop_Density', 'Water_Bodies', 'Poverty', 'Percentage_Vulnerable_Population', 'Conflicts', 'Avg_HH_size', 'Pop_HCFs', 'Lack_of_PH_Training']
 }
 # Create empty dataframe for the dimension means
 dimension_aggregated_df = pd.DataFrame()
@@ -484,8 +487,6 @@ for i, dimension in enumerate(dimension_aggregated_df.columns):
     merged_gdf['Color'] = merged_gdf[dimension + '_Category'].apply(lambda x: norm(category_labels.index(x)))
     # Plot using the 'Color' column to assign colors based on categories
     merged_gdf.plot(column='Color', cmap=colormap, legend=False, ax=ax)
-
-    # merged_gdf.plot(column=dimension + '_Category', cmap=colormap, legend=False, ax=ax)
     ax.set_title(dimension + ' Map')
     ax.set_axis_off()
 # Label the map with region names
@@ -500,7 +501,7 @@ fig.legend(handles=legend_labels, title='Risk Level', loc='upper right')
 plt.show()
 
 # Create scatter plot between risk score and incidence rate
-for region in master_df['ADM1_FR'].unique():
+for region in master_df[common_column].unique():
     region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
     region_risk = merged_gdf[merged_gdf[common_column] == region]['Risk']
     plt.scatter(region_risk, region_incidence, label=region, s=50)
