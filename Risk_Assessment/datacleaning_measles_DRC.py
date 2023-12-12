@@ -82,7 +82,7 @@ def normalize_by_pop(df, desired_column, column_to_normalize):
         if row[column_to_normalize] > row['T_TL']:
             df.loc[index, desired_column] = np.nan
         elif row[column_to_normalize] != 0:
-            df.loc[index, desired_column] = (row[column_to_normalize] / row['T_TL']) * 100
+            df.loc[index, desired_column] = (row[column_to_normalize] / row['T_TL'])
         elif row[column_to_normalize] == 0:
             df.loc[index, desired_column] = 0.0
         else:
@@ -171,8 +171,8 @@ grouped_movement = movement_df.groupby(common_column)['displaced_population'].su
 merged_movement = admin_boundaries.merge(grouped_movement, on=common_column, how="left")
 # Fill NaN values with 0 in the 'displaced_population' column
 merged_movement['displaced_population'] = merged_movement['displaced_population'].fillna(0)
-merged_movement = normalize_by_pop(merged_movement, 'Percentage_displaced_population', 'displaced_population')
-clean_pop_move = merged_movement[[common_column, 'Percentage_displaced_population']]
+merged_movement = normalize_by_pop(merged_movement, 'Fraction_displaced_population', 'displaced_population')
+clean_pop_move = merged_movement[[common_column, 'Fraction_displaced_population']]
 # Align to desired temporal resolution
 displaced_pop = copy_temporal_resolution(clean_pop_move)
 # Add to master dataframe
@@ -215,8 +215,8 @@ extracted_demographies = demography_df.groupby(common_column).agg({ # if the exc
 merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
 merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['T_00_04']+merged_demographies['T_agee'])
 print(merged_demographies['Tot_Vulnerable_Population'])
-merged_demographies = normalize_by_pop(merged_demographies, 'Percentage_Vulnerable_Population', 'Tot_Vulnerable_Population')
-target_demography = merged_demographies[[common_column, 'Percentage_Vulnerable_Population']]
+merged_demographies = normalize_by_pop(merged_demographies, 'Fraction_Vulnerable_Population', 'Tot_Vulnerable_Population')
+target_demography = merged_demographies[[common_column, 'Fraction_Vulnerable_Population']]
 # Align to desired temporal resolution
 vulnerable_demographies_df = copy_temporal_resolution(target_demography)
 # Add to master dataframe
@@ -275,6 +275,8 @@ add_dataframe_to_master(unvaccinated_df)
 print("Collected vaccination coverage")
 
 #################### Finished collecting datasets #######################
+# Remove time periods that are missing incidence dat
+master_df = master_df.dropna(subset=['cases'])
 # Print the final dataframe to a CSV
 print(master_df)
 master_df.to_csv('complete_dataset_df_'+temporal+'.csv', index=False)

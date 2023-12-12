@@ -123,7 +123,7 @@ def normalize_by_pop(df, desired_column, column_to_normalize):
         if row[column_to_normalize] > row['Population']:
             df.loc[index, desired_column] = np.nan
         elif row[column_to_normalize] != 0:
-            df.loc[index, desired_column] = (row[column_to_normalize] / row['Population']) * 100
+            df.loc[index, desired_column] = (row[column_to_normalize] / row['Population'])
         elif row[column_to_normalize] == 0:
             df.loc[index, desired_column] = 0.0
         else:
@@ -271,8 +271,8 @@ extracted_demographies = demography_df.groupby(common_column).agg({
 # Merge on admin boundaries
 merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
 merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['enfants 0-59 mois']+merged_demographies['Femmes enceintes attendues']+merged_demographies['50 ans et plus Masculin']+merged_demographies['50 ans et plus Féminin'])
-merged_demographies = normalize_by_pop(merged_demographies, 'Percentage_Vulnerable_Population', 'Tot_Vulnerable_Population')
-target_demography = merged_demographies[[common_column, 'Percentage_Vulnerable_Population']]
+merged_demographies = normalize_by_pop(merged_demographies, 'Fraction_Vulnerable_Population', 'Tot_Vulnerable_Population')
+target_demography = merged_demographies[[common_column, 'Fraction_Vulnerable_Population']]
 # Align to desired temporal resolution
 vulnerable_demographies_df = copy_temporal_resolution(target_demography)
 # Add to master dataframe
@@ -347,6 +347,8 @@ add_dataframe_to_master(ph_training_df)
 print("Collected public health training")
 
 #################### Finished collecting datasets #######################
+# Remove time periods that are missing incidence dat
+master_df = master_df.dropna(subset=['cases'])
 # Print the final dataframe to a CSV without an additional row for the admin level geometries
 print(master_df)
 master_df.to_csv('complete_dataset_df_'+temporal+'.csv', index=False)

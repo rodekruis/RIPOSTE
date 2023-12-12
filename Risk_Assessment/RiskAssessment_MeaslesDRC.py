@@ -36,8 +36,6 @@ print("Loaded admin boundaries")
 
 #Load data
 master_df = pd.read_csv('complete_dataset_df_'+temporal+'.csv')
-# Remove time periods that are missing incidence data
-master_df_clean = master_df.dropna(subset=['Attack Rate'])
 
 #load functions
 def normalize_minmax(df, column, min=None, max=None):
@@ -105,7 +103,7 @@ def inform_class_thresholds(value, thresholds):
 
 ## Plots of indicators distribution
 # Get the number of unique y datasets
-unique_datasets = [col for col in master_df_clean.columns if col not in ['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
+unique_datasets = [col for col in master_df.columns if col not in ['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
 # Calculate the number of rows and columns for subplots
 num_rows = len(unique_datasets) // 3 + (len(unique_datasets) % 3 > 0)
 num_cols = min(len(unique_datasets), 3)
@@ -115,7 +113,7 @@ fig, axs = plt.subplots(num_rows, num_cols, figsize=(16, 12))
 for i, dataset in enumerate(unique_datasets):
     row, col = divmod(i, num_cols)
     ax = axs[row, col]
-    sns.histplot(master_df_clean[dataset], kde=True, ax=ax)
+    sns.histplot(master_df[dataset], kde=True, ax=ax)
     ax.set_title(f'Distribution plot for {dataset}')
     ax.set_xlabel(dataset)
     ax.set_ylabel("Frequency")
@@ -128,7 +126,7 @@ plt.show()
 
 ################### Outlier removal of incidence data #####################
 outliers_removed_count = 0
-for col in ["cases"]:
+for col in ["Attack Rate"]:
   Q1 = master_df[col].quantile(0.25)
   Q3 = master_df[col].quantile(0.75)
   IQR = Q3 - Q1
@@ -173,9 +171,9 @@ print("Aggregated to remove temporal resolution")
 # # Define the dimensions
 # dimensions = {
 #     'Hazard and Exposure': ['Pop_Density'],
-#     'Vulnerability': ['Poverty', 'Percentage_Vulnerable_Population', 'Percentage_displaced_population'],
+#     'Vulnerability': ['Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population'],
 #     'Lack of Coping Capacity': ['Lack of HCF', 'Proportion_Unvaccinated_Children'],
-#     'Risk': ['Pop_Density', 'Percentage_displaced_population', 'Poverty', 'Percentage_Vulnerable_Population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
+#     'Risk': ['Pop_Density', 'Fraction_displaced_population', 'Poverty', 'Fraction_Vulnerable_Population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
 # }
 # # Create empty dataframe for the dimension means
 # risk_aggregated_df = pd.DataFrame()
@@ -240,7 +238,7 @@ print("Aggregated to remove temporal resolution")
 
 ################  Weighted Index ################
 # Complete Pearson correlation to determine the coefficients that will be the weights in the index
-columns_to_agg = ['Pop_Density', 'Poverty', 'Percentage_Vulnerable_Population', 'Percentage_displaced_population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
+columns_to_agg = ['Pop_Density', 'Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
 # Group by the common column and calculate the mean, handling NaN values
 time_aggregated_df = time_aggregated_df.groupby(common_column)[columns_to_agg + ['Attack Rate']].agg(np.nanmean)
 # Drop rows with NaN values in any of the selected columns
@@ -351,10 +349,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_squared_error
 
-# Assuming your data is in a DataFrame named 'master_df' with columns including 'Attack Rate', 'Pop_Density', 'Poverty', 'Percentage_Vulnerable_Population', 'Percentage_displaced_population', 'Lack of HCF'
+# Assuming your data is in a DataFrame named 'master_df' with columns including 'Attack Rate', 'Pop_Density', 'Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population', 'Lack of HCF'
 
 # Define features and target variable
-features = ['Pop_Density', 'Poverty', 'Percentage_Vulnerable_Population', 'Percentage_displaced_population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
+features = ['Pop_Density', 'Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population', 'Lack of HCF', 'Proportion_Unvaccinated_Children']
 target = 'Attack Rate'
 master_df.dropna(inplace=True)
 
