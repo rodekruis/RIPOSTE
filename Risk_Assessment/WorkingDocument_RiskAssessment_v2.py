@@ -556,6 +556,37 @@ for model_name, metrics in model_metrics.items():
     for metric, value in metrics.items():
         print(f"{metric}: {value:.2f}")
     print()
+#############Principal Component Analysis##########
+## Identify if there is collinearity between indictaors - the higher the VIF the higher the collinearity
+# Calculate VIF for each numeric variable
+vif_data = pd.DataFrame()
+vif_data["Variable"] = X.columns
+vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+# Display the DataFrame with VIF values
+print(vif_data)
+
+## Complete Principal Component Analysis to reduce number of indicators
+# Identify number of principal components
+pca = PCA()
+principal_components = pca.fit_transform(X, y)
+explained_variance_ratio = pca.explained_variance_ratio_
+cumulative_variance_ratio = np.cumsum(explained_variance_ratio)
+plt.figure(figsize=(8,5))
+plt.plot(range(1, len(explained_variance_ratio)+1), cumulative_variance_ratio, marker='o')
+plt.show() #Shows number of components showing greatest influence
+# Show the colinearity
+loadings = pca.components_.T
+plt.figure(figsize=(10,6))
+heatmap = sns.heatmap(np.abs(loadings), annot=True, cmap="viridis")
+heatmap.set_yticklabels(X, rotation=0)
+plt.show()
+# Train new model
+selected_components = principal_components[:, :4] #Change to number of components with greatest influence based on earlier graph
+regression_model = LinearRegression()
+regression_model.fit(selected_components, y)
+print(f'Linear Regression with PCA R sq{regression_model.score(selected_components, y)}')
+feature_importance = pd.Series(regression_model.coef_, index=[f'PC{i+1}' for i in range(4)]) #Change to number of components with greatest influence based on earlier graph
+# print(feature_importance)
 
 ##################### Aggregation #########################
 ## Combine all the incidence data for each admin level

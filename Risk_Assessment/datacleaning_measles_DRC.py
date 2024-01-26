@@ -20,18 +20,18 @@ os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipat
 common_column = "ADM2_FR"
 
 # Set temporal resolution
-temporal = "yearly"
-temp_res = relativedelta(years=1)
+temporal = "static"
+# temp_res = relativedelta(months=1)
 study_start = datetime(2020, 1, 1)
 study_end = datetime(2023, 10, 1)
-start_dates = []
-end_dates = []
-current_date = study_start
-while current_date <= study_end:
-    start_dates.append(current_date)
-    end_dates.append(current_date + temp_res)
-    current_date += temp_res
-data = {'start_date': start_dates, 'end_date': end_dates}
+# start_dates = []
+# end_dates = []
+# current_date = study_start
+# while current_date <= study_end:
+#     start_dates.append(current_date)
+#     end_dates.append(current_date + temp_res)
+#     current_date += temp_res
+data = {'start_date': [study_start], 'end_date': [study_end]}
 time_periods = pd.DataFrame(data)
 
 # Administrative level SHP file
@@ -116,6 +116,7 @@ filtered_data = filtered_data[filtered_data[common_column].isin(admin_boundaries
 # Merge admin_boundaries with filtered_data
 summary_incidence = admin_boundaries.merge(filtered_data, on=common_column, how="left")
 incidence = summary_incidence[['start_date', common_column, 'cases', 'deaths']]
+
 # Aggregate the data temporally
 temp_aggregated_data = []
 for _, period in time_periods.iterrows():
@@ -201,7 +202,7 @@ poverty_df = copy_temporal_resolution(poverty)
 add_dataframe_to_master(poverty_df)
 print("Collected poverty")
 
-### Demography(CSV)
+### Demography(CSV): Vulnerable population = women and children under 5
 # Load data
 demography_df = pd.read_csv('Datasets_Directory/cod_admpop_adm2_2020.csv')
 demography_df.rename(columns={'admin2Name_fr': common_column}, inplace=True)
@@ -209,11 +210,11 @@ demography_df[common_column] = demography_df[common_column].str.upper()
 # Group by admin level and calculate the sum of each group
 extracted_demographies = demography_df.groupby(common_column).agg({ # if the excel has a blank cell the sum shouldn't make them 0s
     'T_00_04': lambda x: x.sum(skipna=True) if any(x.notna()) else np.nan,
-    'T_agee': lambda x: x.sum(skipna=True) if any(x.notna()) else np.nan, #Need to work out what the age range is for this, or maybe remove as adults aren't vulnerable only children and maybe teenagers
+    'F_TL': lambda x: x.sum(skipna=True) if any(x.notna()) else np.nan,
 }).reset_index()
-# Merge on admin boundaries
+# Merge on admin boundaries ***Fix overlap of women under 5!
 merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
-merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['T_00_04']+merged_demographies['T_agee'])
+merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['T_00_04']+merged_demographies['F_TL'])
 print(merged_demographies['Tot_Vulnerable_Population'])
 merged_demographies = normalize_by_pop(merged_demographies, 'Fraction_Vulnerable_Population', 'Tot_Vulnerable_Population')
 target_demography = merged_demographies[[common_column, 'Fraction_Vulnerable_Population']]
@@ -273,6 +274,47 @@ unvaccinated_df = copy_temporal_resolution(unvaccinated)
 # Add to master dataframe
 add_dataframe_to_master(unvaccinated_df)
 print("Collected vaccination coverage")
+
+### Vulnerability census data (csv)
+# Load data
+census_df = pd.read_csv('Datasets_Directory/REACH_DRC_WASH+HHchief+education+HCFaccessibility.csv')
+census_df[common_column] = census_df[common_column].str.upper()
+census_gdf = admin_boundaries.merge(census_df, on=common_column, how="left")
+print(census_gdf.count())
+print(census_gdf.loc[census_gdf['No Access HCF'].isna(), common_column])
+# No Access to HCF
+HCF_access = census_gdf[[common_column, 'No Access HCF']]
+temp_HCF_access = copy_temporal_resolution(HCF_access)
+add_dataframe_to_master(temp_HCF_access)
+# No Eduction
+no_education = census_gdf[[common_column, 'No School']]
+temp_education = copy_temporal_resolution(no_education)
+add_dataframe_to_master(temp_education)
+# Old Household Chief
+old_chief = census_gdf[[common_column, 'Old Household Chief']]
+temp_old_chief = copy_temporal_resolution(old_chief)
+add_dataframe_to_master(temp_old_chief)
+# Female Household Chief
+female_chief = census_gdf[[common_column, 'Female Household Chief']]
+temp_female_chief = copy_temporal_resolution(female_chief)
+add_dataframe_to_master(temp_female_chief)
+# No Handwashing
+no_handwashing = census_gdf[[common_column, 'No Handwashing']]
+temp_handwashing = copy_temporal_resolution(no_handwashing)
+add_dataframe_to_master(temp_handwashing)
+print("Collected census data")
+
+### Malnourished (csv)
+# Load data
+malnourished_df = pd.read_csv('Datasets_Directory/Malnourished_IPC.csv')
+malnourished_df[common_column] = malnourished_df[common_column].str.upper()
+malnourished_gdf = admin_boundaries.merge(malnourished_df, on=common_column, how="left")
+malnourished = malnourished_gdf[[common_column, 'Malnourished']]
+temp_malnourished = copy_temporal_resolution(malnourished)
+add_dataframe_to_master(temp_malnourished)
+print(malnourished)
+print(malnourished.loc[malnourished['Malnourished'].isna(), common_column])
+print("Collected malnutrition data")
 
 #################### Finished collecting datasets #######################
 # Remove time periods that are missing incidence dat

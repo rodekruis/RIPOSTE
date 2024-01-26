@@ -167,18 +167,6 @@ precipitation_df = pd.read_csv(('total_precipitation_sum_'+temporal+'.csv'), par
 add_dataframe_to_master(precipitation_df)
 print("Collected precipitation")
 
-# # Create a time series plot for each region
-# regions = precipitation_df['ADM1_FR'].unique()
-# for region in regions:
-#     region_data = precipitation_df[precipitation_df['ADM1_FR'] == region]
-#     plt.plot(region_data['start_date'], region_data['total_precipitation_sum'], label=region)
-#
-# plt.xlabel('Date')
-# plt.ylabel('Precipitation')
-# plt.title('Precipitation Time Series by Region')
-# plt.legend()
-# plt.show()
-
 ### Temperature (GEE)
 # # Extract data from GEE
 # temperature_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'skin_temperature')
@@ -187,18 +175,6 @@ temperature_df = pd.read_csv('skin_temperature_'+temporal+'.csv', parse_dates=['
 # Add to master dataframe
 add_dataframe_to_master(temperature_df)
 print("Collected surface temperature")
-
-# # Create a time series plot for each region
-# regions = temperature_df['ADM1_FR'].unique()
-# for region in regions:
-#     region_data = temperature_df[temperature_df['ADM1_FR'] == region]
-#     plt.plot(region_data['start_date'], region_data['skin_temperature'], label=region)
-#
-# plt.xlabel('Date')
-# plt.ylabel('Temperature')
-# plt.title('Temperature Time Series by Region')
-# plt.legend()
-# plt.show()
 
 ### Population Density (TIFF) - using point data from Meta (avg # of people per 30-meter grid tile in an amdin boundary); NB: could also use excel sheet from MinSanté which has all admin levels
 # Load data
@@ -222,12 +198,16 @@ print("Collected population density")
 src = rasterio.open('Datasets_Directory/WaterBodies.tif')
 # Loop through admin areas and extract all values from the tif
 total_waterbodies = []
+# Define a buffer distance around the admin boundaries to ensure the sea is counted to consider pixels around the boundary
+buffer_distance = 0.1
 for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
-    out_image, out_transform = mask(src, [geom], crop=True)
+    # Create a buffered geometry to include neighboring pixels
+    buffered_geom = geom.buffer(buffer_distance)
+    out_image, out_transform = mask(src, [buffered_geom], crop=True)
     mean_value = np.nanmean(out_image)
     total_waterbodies.append({common_column: row['ADM1_FR'], 'Water_Bodies': mean_value})
-    waterbodies = pd.DataFrame(total_waterbodies)
+waterbodies = pd.DataFrame(total_waterbodies)
 # Align to desired temporal resolution
 waterbodies_df = copy_temporal_resolution(waterbodies)
 # Add to master dataframe
@@ -256,28 +236,28 @@ poverty_df = copy_temporal_resolution(poverty)
 add_dataframe_to_master(poverty_df)
 print("Collected poverty")
 
-### Demography(CSV)
-# Load data
-demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
-demography_df.rename(columns={'Région': common_column}, inplace=True)
-# Group by admin level and calculate the sum of each group
-extracted_demographies = demography_df.groupby(common_column).agg({
-    'Population 2023 estimée (Les deux sexes)': 'sum',
-    'enfants 0-59 mois': 'sum',
-    'Femmes enceintes attendues': 'sum',
-    '50 ans et plus Masculin': 'sum',
-    '50 ans et plus Féminin': 'sum'
-}).reset_index()
-# Merge on admin boundaries
-merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
-merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['enfants 0-59 mois']+merged_demographies['Femmes enceintes attendues']+merged_demographies['50 ans et plus Masculin']+merged_demographies['50 ans et plus Féminin'])
-merged_demographies = normalize_by_pop(merged_demographies, 'Fraction_Vulnerable_Population', 'Tot_Vulnerable_Population')
-target_demography = merged_demographies[[common_column, 'Fraction_Vulnerable_Population']]
-# Align to desired temporal resolution
-vulnerable_demographies_df = copy_temporal_resolution(target_demography)
-# Add to master dataframe
-add_dataframe_to_master(vulnerable_demographies_df)
-print("Collected demography")
+# ### Demography(CSV) - currently no clear vulnerable groups based on literature
+# # Load data
+# demography_df = pd.read_csv('Datasets_Directory/demography_2023.csv')
+# demography_df.rename(columns={'Région': common_column}, inplace=True)
+# # Group by admin level and calculate the sum of each group
+# extracted_demographies = demography_df.groupby(common_column).agg({
+#     'Population 2023 estimée (Les deux sexes)': 'sum',
+#     'enfants 0-59 mois': 'sum',
+#     'Femmes enceintes attendues': 'sum',
+#     '50 ans et plus Masculin': 'sum',
+#     '50 ans et plus Féminin': 'sum'
+# }).reset_index()
+# # Merge on admin boundaries
+# merged_demographies = admin_boundaries.merge(extracted_demographies, on=common_column, how="left")
+# merged_demographies['Tot_Vulnerable_Population'] = (merged_demographies['enfants 0-59 mois']+merged_demographies['Femmes enceintes attendues']+merged_demographies['50 ans et plus Masculin']+merged_demographies['50 ans et plus Féminin'])
+# merged_demographies = normalize_by_pop(merged_demographies, 'Fraction_Vulnerable_Population', 'Tot_Vulnerable_Population')
+# target_demography = merged_demographies[[common_column, 'Fraction_Vulnerable_Population']]
+# # Align to desired temporal resolution
+# vulnerable_demographies_df = copy_temporal_resolution(target_demography)
+# # Add to master dataframe
+# add_dataframe_to_master(vulnerable_demographies_df)
+# print("Collected demography")
 
 ### Household Size (CSV)
 hh_size = pd.read_csv('Datasets_Directory/hh_size.csv')
@@ -324,27 +304,27 @@ wash_df = copy_temporal_resolution(WASH)
 add_dataframe_to_master(wash_df)
 print("Collected WASH")
 
-### Health Care Facilities (CSV)
-HCF_df = pd.read_csv('Datasets_Directory/HCF.csv')
-merged_HCF = admin_boundaries.merge(HCF_df, on=common_column, how="left")
-# Define only the 2 columns needed in dataframe
-HCF = merged_HCF[['ADM1_FR', 'Pop_HCFs']]
-# Align to desired temporal resolution
-hcf_df = copy_temporal_resolution(HCF)
-# Add to master dataframe
-add_dataframe_to_master(hcf_df)
-print("Collected HCF")
+# ### Health Care Facilities (CSV) - Equivalent to FOSAs and less reliable data source
+# pop_HCF_df = pd.read_csv('Datasets_Directory/HCF.csv')
+# merged_pop_HCF = admin_boundaries.merge(pop_HCF_df, on=common_column, how="left")
+# # Define only the 2 columns needed in dataframe
+# pop_HCF = merged_pop_HCF[['ADM1_FR', 'Pop_HCFs']]
+# # Align to desired temporal resolution
+# pop_HCF_temp = copy_temporal_resolution(pop_HCF)
+# # Add to master dataframe
+# add_dataframe_to_master(pop_HCF_temp)
+# print("Collected HCF")
 
-### Public health training (CSV)
-ph_training = pd.read_csv('Datasets_Directory/formations_sanitaires.csv')
-merged_ph_training = admin_boundaries.merge(ph_training, on=common_column, how="left")
+### Public health facilities (CSV)
+ph_facility = pd.read_csv('Datasets_Directory/formations_sanitaires.csv')
+merged_ph_facility = admin_boundaries.merge(ph_facility, on=common_column, how="left")
 # Define only the 2 columns needed in dataframe
-ph_training_clean = merged_ph_training[['ADM1_FR', 'FOSA/1000_hab.']]
+ph_facility_clean = merged_ph_facility[['ADM1_FR', 'FOSA/1000_hab.']]
 # Align to desired temporal resolution
-ph_training_df = copy_temporal_resolution(ph_training_clean)
+ph_facility_df = copy_temporal_resolution(ph_facility_clean)
 # Add to master dataframe
-add_dataframe_to_master(ph_training_df)
-print("Collected public health training")
+add_dataframe_to_master(ph_facility_df)
+print("Collected public health facility")
 
 #################### Finished collecting datasets #######################
 # Remove time periods that are missing incidence dat
