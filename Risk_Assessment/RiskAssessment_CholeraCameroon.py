@@ -100,15 +100,69 @@ risk_dimensions_mapping = {
 #     plt.show()
 # print("Plotted graphs")
 
-# ## Incidence Graph for French Presentation
+## Incidence Graph for French Presentation
+plt.figure(figsize=(8,6))
+plt.title(f'Incidence de Choléra')
+subset_df = master_df.set_index(index_columns)['Attack Rate'].unstack(common_column)
+subset_df.plot(kind='line', ax=plt.gca())
+plt.xlabel('Dates')
+plt.ylabel('Taux d\'Attaque')
+plt.legend(title='Régions', loc='upper right')
+plt.show()
+
+# ## Incidence, Precipitation, Temperature Graph for French Presentation
 # plt.figure(figsize=(8,6))
 # plt.title(f'Incidence de Choléra')
 # subset_df = master_df.set_index(index_columns)['Attack Rate'].unstack(common_column)
-# subset_df.plot(kind='line', ax=plt.gca())
+# subset_df.plot(kind='line', ax=plt.gca(), label='Taux d\'Attaque', linestyle='-', marker='o')
+# ax2 = plt.gca().twinx()
+# subset_df2 = master_df.set_index(index_columns)['total_precipitation_sum'].unstack(common_column)
+# subset_df2.plot(kind='line', ax=ax2, color='orange', label='Précipitation', linestyle='--', marker='^')  # Line2 is the label for the second line
+# ax3 = plt.gca().twinx()
+# ax3.spines['right'].set_position(('outward', 60))  # Adjust the position of the third y-axis
+# subset_df3 = master_df.set_index(index_columns)['skin_temperature'].unstack(common_column)
+# subset_df3.plot(kind='line', ax=ax3, color='green', label='Température', linestyle=':', marker='s')  # Line3 is the label for the third line
 # plt.xlabel('Dates')
 # plt.ylabel('Taux d\'Attaque')
 # plt.legend(title='Régions', loc='upper right')
 # plt.show()
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8,6))
+plt.title(f'Incidence, Précipitation, Température')
+
+# Get unique colors for each region
+region_colors = plt.cm.get_cmap('tab10', len(master_df[common_column].unique()))
+
+# Plot Incidence (Taux d'Attaque)
+subset_df = master_df.set_index(index_columns)['Attack Rate'].unstack(common_column)
+for i, region in enumerate(subset_df.columns):
+    subset_df[region].plot(kind='line', ax=plt.gca(), label=f'Taux d\'Attaque - {region}', linestyle='-', marker='o', color=region_colors(i))
+
+# Plot Précipitation
+ax2 = plt.gca().twinx()
+subset_df2 = master_df.set_index(index_columns)['total_precipitation_sum'].unstack(common_column)
+for i, region in enumerate(subset_df2.columns):
+    subset_df2[region].plot(kind='line', ax=ax2, label=f'Précipitation - {region}', linestyle='--', marker='^', color=region_colors(i))
+
+# Plot Température
+ax3 = plt.gca().twinx()
+ax3.spines['right'].set_position(('outward', 60))
+subset_df3 = master_df.set_index(index_columns)['skin_temperature'].unstack(common_column)
+for i, region in enumerate(subset_df3.columns):
+    subset_df3[region].plot(kind='line', ax=ax3, label=f'Température - {region}', linestyle=':', marker='s', color=region_colors(i))
+
+# Set labels and legend
+plt.xlabel('Dates')
+plt.ylabel('Taux d\'Attaque / Précipitation / Température')
+plt.legend(title='Régions', loc='upper right')
+
+# Display the plot
+plt.show()
+
+
+
+
 
 # ## Plots of indicators vs incidence
 # # Get the number of unique y datasets
