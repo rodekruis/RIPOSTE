@@ -23,25 +23,28 @@ from sklearn.metrics import mean_squared_error
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 #set wd
-os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Measles DRC/Data')
+os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/510/Anticipatory Action/RIPOSTE/Measles DRC/Data')
 
 #set variables
 # Set spatial resolution and set the common column to merge the data spatially
-common_column = "ADM2_FR"
+zone = "Zone"
+province = "Province"
 
 # Create master dataframe to store all the datasets
-index_columns = ['start_date', 'end_date', common_column]
+index_columns = ['start_date', 'end_date', zone, province]
 
 # Set temporal resolution
 temporal = "static"
 
 #load admin boundaries
 # Administrative level SHP file
-admin_shp_path = "Administrative Boundaries\cod_admbnda_adm2_rgc_20190911.shp"
+admin_shp_path = "Els/RDC_Zones de santé.shp"
 full_admin_boundaries = gpd.read_file(admin_shp_path)
-admin_boundaries = full_admin_boundaries[[common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
+full_admin_boundaries.rename(columns={'Nom': zone, 'PROVINCE': province},inplace=True)  # Fix the naming of columns
+admin_boundaries = full_admin_boundaries[[zone, province, 'geometry']]
 # Make all admin names upper case to match other dataset inputs
-admin_boundaries[common_column] = admin_boundaries[common_column].str.upper()
+admin_boundaries[zone] = admin_boundaries[zone].str.upper()
+admin_boundaries[province] = admin_boundaries[province].str.upper()
 print("Loaded admin boundaries")
 
 #Load data
@@ -204,23 +207,23 @@ print("Outliers removed")
 ################### Normalize df of indicators ######################
 # NB: Currently not setting fixed min and max values for any dataset, this might need to be changed. Also normalization might need to be done per region or time period.
 normalized_df = master_df
-for dataset in [col for col in master_df.columns if col not in ['start_date', 'end_date', common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]:
+for dataset in [col for col in master_df.columns if col not in ['start_date', 'end_date', zone, province, 'Shape_Leng', 'Shape_Area', 'geometry']]:
   normalized_df = normalize_minmax(master_df, dataset)
 # Inverse datasets that were not initially indexes and are not yet with the negative influence being the highest value
 normalized_df['HCF/pop'] = (10 - normalized_df['HCF/pop'])
 normalized_df.rename(columns={'HCF/pop': 'Lack of HCF'}, inplace=True)
 print("Datasets normalized")
 
-##################### Aggregation #########################
-## Combine all the incidence data for each admin level
-# Only find the mean of numeric columns
-numeric_columns = normalized_df.select_dtypes(include=['number']).columns.tolist()
+##################### Aggregation ######################### -> only needed on non-static data
+# ## Combine all the incidence data for each admin level
+# # Only find the mean of numeric columns
+# numeric_columns = normalized_df.select_dtypes(include=['number']).columns.tolist()
 columns_to_agg = ['Pop_Density', 'Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population', 'Lack of HCF', 'Proportion_Unvaccinated_Children', 'Malnourished', 'No School', 'No Handwashing', 'Old Household Chief', 'Female Household Chief', 'No Access HCF']
-# Make the order of the regions fixed
-normalized_df[common_column] = pd.Categorical(normalized_df[common_column], categories=normalized_df[common_column].unique(), ordered=True)
-# Find the mean per admin level
-time_aggregated_df = normalized_df.groupby(common_column)[numeric_columns].mean()
-print("Aggregated to remove temporal resolution")
+# # Make the order of the regions fixed
+# normalized_df[zone] = pd.Categorical(normalized_df[zone], categories=normalized_df[zone].unique(), ordered=True)
+# # Find the mean per admin level
+# time_aggregated_df = normalized_df.groupby([zone, province])[numeric_columns].mean()
+# print("Aggregated to remove temporal resolution")
 
 # #####################  INFORM - Hierarchical Model ################
 # ## Combine the datasets into values per dimension
@@ -320,7 +323,7 @@ for model_name, model in models.items():
     model_instances[model_name] = model
     # Display R-squared values
     print(f'{model_name} Training R sq: {model.score(X_train, y_train)}')
-    print(f'{model_name} Training R sq: {model.score(X_test, y_test)}')
+    print(f'{model_name} Testing R sq: {model.score(X_test, y_test)}')
 
     # Display feature importance
     if model_name == 'Random Forest':
@@ -350,9 +353,17 @@ plt.show()
 lr_model = LinearRegression().fit(X_train, y_train)
 print("Regression Coefficients:", lr_model.coef_)
 # Multiply the correlation coefficients with the indicator values
-weighted_indicators = [coef * time_aggregated_df[col] for coef, col in zip(lr_model.coef_, columns_to_agg)]
+weighted_indicators = [coef * normalized_df[col] for coef, col in zip(lr_model.coef_, columns_to_agg)]
 # Combine the weighted indicators into a DataFrame
 risk_scores_df = pd.DataFrame(weighted_indicators).transpose()
+risk_scores_df = pd.concat([normalized_df[[zone, province]], risk_scores_df], axis=1)
+print(risk_scores_df)
+
+## Risk score per indicator
+risk_scores_df.to_csv('weighted_risk_score_per_indicator_df_'+temporal+'.csv', index=True)
+print("Created indicator risk scores")
+
+## Aggregate by dimension
 dimensions = {
     'Hazard and Exposure': ['Pop_Density'],
     'Vulnerability': ['Poverty', 'Fraction_Vulnerable_Population', 'Fraction_displaced_population', 'Malnourished', 'No School',  'Old Household Chief', 'Female Household Chief'],
@@ -364,13 +375,14 @@ risk_aggregated_df = pd.DataFrame()
 for dimension, columns_to_agg in dimensions.items():
     # Group by 'Category' and calculate the mean for all columns
     risk_aggregated_df[dimension] = risk_scores_df[columns_to_agg].mean(axis=1)
+risk_aggregated_df = pd.concat([normalized_df[[zone, province]], risk_aggregated_df], axis=1)
 risk_aggregated_df.to_csv('weighted_risk_score_df_'+temporal+'.csv', index=True)
-print("Created risk scores")
+print("Created dimension risk scores")
 
-##################### Draw the weighted risk maps ########################
+##################### Draw the weighted risk maps per dimension ########################
 # Merge the shapefile GeoDataFrame with the cluster labels DataFrame based on the 'Country' column
-merged_gdf = admin_boundaries.merge(risk_aggregated_df, on=common_column)
-merged_time_gdf = admin_boundaries.merge(time_aggregated_df, on=common_column)
+merged_gdf = admin_boundaries.merge(risk_aggregated_df, on=[zone, province])
+merged_time_gdf = admin_boundaries.merge(normalized_df, on=[zone, province])
 # Define the risk categories
 category_labels = ["Very low", "Low", "Medium", "High", "Very high"]
 category_colors = [(1.0, 0.9607843137254902, 0.9411764705882353, 1.0),
@@ -401,32 +413,73 @@ fig.legend(handles=legend_labels, title='Niveau de Risque', loc='upper right', b
 plt.show()
 
 ############# Plot risk index accuracy - risk score vs incidence rate ##################
-# Create scatter plot
-for region in master_df[common_column].unique():
-    region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
-    region_risk = merged_gdf[merged_gdf[common_column] == region]['Risk']
-    plt.scatter(region_risk, region_incidence, label=region, s=50)
+# # Create scatter plot
+# for region in master_df[common_column].unique():
+#     region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
+#     region_risk = merged_gdf[merged_gdf[common_column] == region]['Risk']
+#     plt.scatter(region_risk, region_incidence, label=region, s=50)
+# plt.xlabel('Risk Score')
+# plt.ylabel('Measles Attack Rate')
+# plt.title('Correlation between risk level and measles incidence')
+# plt.legend()
+# plt.show()
+#
+# # Create a box and whisker plot
+# boxplot_incidence = []
+# boxplot_risk_category = []
+# for region in master_df[common_column].unique():
+#     region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
+#     boxplot_incidence.extend(region_incidence.tolist())
+#     region_risk_category = merged_gdf[merged_gdf[common_column] == region]['Risk_Category']
+#     boxplot_risk_category.extend(region_risk_category.tolist())
+# # Create a DataFrame from the lists
+# data = pd.DataFrame({
+#     'Risk_Category': boxplot_risk_category,
+#     'Attack Rate': boxplot_incidence
+# })
+# # Specify the order of risk categories
+# category_order = ["Very low", "Low", "Medium", "High", "Very high"]
+# # Create a box and whisker plot with specified order
+# plt.figure(figsize=(12, 8))
+# sns.boxplot(x='Risk_Category', y='Attack Rate', data=data, order=category_order)
+# plt.xlabel('Risk Level')
+# plt.ylabel('Measles Attack Rate')
+# plt.title('Box and Whisker Plot of Measles Attack Rate by Risk Level')
+# plt.show()
+
+# Scatter plot
+for region in master_df[[zone, province]].drop_duplicates().itertuples(index=False):
+    zone, province = region
+    region_incidence = merged_time_gdf[(merged_time_gdf[zone] == zone) & (merged_time_gdf[province] == province)]['Attack Rate']
+    region_risk = merged_gdf[(merged_gdf[zone] == zone) & (merged_gdf[province] == province)]['Risk']
+    plt.scatter(region_risk, region_incidence, label=f"{zone}, {province}", s=50)
+
 plt.xlabel('Risk Score')
 plt.ylabel('Measles Attack Rate')
 plt.title('Correlation between risk level and measles incidence')
 plt.legend()
 plt.show()
 
-# Create a box and whisker plot
+# Box and whisker plot
 boxplot_incidence = []
 boxplot_risk_category = []
-for region in master_df[common_column].unique():
-    region_incidence = merged_time_gdf[merged_time_gdf[common_column] == region]['Attack Rate']
+
+for region in master_df[[zone, province]].drop_duplicates().itertuples(index=False):
+    zone, province = region
+    region_incidence = merged_time_gdf[(merged_time_gdf[zone] == zone) & (merged_time_gdf[province] == province)]['Attack Rate']
     boxplot_incidence.extend(region_incidence.tolist())
-    region_risk_category = merged_gdf[merged_gdf[common_column] == region]['Risk_Category']
+    region_risk_category = merged_gdf[(merged_gdf[zone] == zone) & (merged_gdf[province] == province)]['Risk_Category']
     boxplot_risk_category.extend(region_risk_category.tolist())
+
 # Create a DataFrame from the lists
 data = pd.DataFrame({
     'Risk_Category': boxplot_risk_category,
     'Attack Rate': boxplot_incidence
 })
+
 # Specify the order of risk categories
 category_order = ["Very low", "Low", "Medium", "High", "Very high"]
+
 # Create a box and whisker plot with specified order
 plt.figure(figsize=(12, 8))
 sns.boxplot(x='Risk_Category', y='Attack Rate', data=data, order=category_order)

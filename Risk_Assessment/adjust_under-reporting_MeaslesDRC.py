@@ -8,20 +8,23 @@ import distancerasters as dr
 
 ########################## Definitions ########################
 # Set working directory
-os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Measles DRC/Data')
+os.chdir('C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/510/Anticipatory Action/RIPOSTE/Measles DRC/Data')
 # Set spatial resolution and set the common column to merge the data spatially
-common_column = "ADM2_FR"
+zone = "Zone"
+province = "Province"
 # Set temporal resolution
 temporal = "static"
 # Load admin boundaries
 # Administrative level SHP file
-admin_shp_path = "Administrative Boundaries\cod_admbnda_adm2_rgc_20190911.shp"
+admin_shp_path = "Els/RDC_Zones de santé.shp"
 full_admin_boundaries = gpd.read_file(admin_shp_path)
-admin_boundaries = full_admin_boundaries[[common_column, 'Shape_Leng', 'Shape_Area', 'geometry']]
-admin_boundaries[common_column] = admin_boundaries[common_column].str.upper()
+full_admin_boundaries.rename(columns={'Nom': zone, 'PROVINCE': province},inplace=True)  # Fix the naming of columns
+admin_boundaries = full_admin_boundaries[[zone, province, 'geometry']]
+admin_boundaries[zone] = admin_boundaries[zone].str.upper()
+admin_boundaries[province] = admin_boundaries[province].str.upper()
 #Load data
 master_df = pd.read_csv('complete_dataset_df_'+temporal+'.csv')
-index_columns = ['start_date', 'end_date', common_column]
+index_columns = ['start_date', 'end_date', zone, province]
 # Accessibility to HCFs
 hcfs = gpd.read_file('DRC_hcf.shp')
 pop_density = 'Datasets_Directory/cod_pd_2020_1km.tif'
@@ -33,13 +36,13 @@ print("Loaded data")
 pixel_size = 0.01
 
 # rasterize vector data and output to geotiff
-rv_array, affine = dr.rasterize(hcfs, pixel_size=pixel_size, bounds=admin_boundaries.total_bounds, output="C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Measles DRC/Data/hcf_rasterized.tif")
+rv_array, affine = dr.rasterize(hcfs, pixel_size=pixel_size, bounds=admin_boundaries.total_bounds, output="C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/510/Anticipatory Action/RIPOSTE/Measles DRC/Data/hcf_rasterized.tif")
 
 def raster_conditional(rarray):
     return (rarray == 1)
 
 # generate distance array and output to geotiff
-my_dr = dr.DistanceRaster(rv_array, affine=affine, output_path="C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/Anticipatory Action/RIPOSTE/Measles DRC/Data/distance_raster.tif", conditional=raster_conditional)
+my_dr = dr.DistanceRaster(rv_array, affine=affine, output_path="C:/Users/mdroogleverfortuyn/OneDrive - Rode Kruis/Documenten/510/Anticipatory Action/RIPOSTE/Measles DRC/Data/distance_raster.tif", conditional=raster_conditional)
 
 ## Create reporting probability raster
 # decay in the probability of reporting a disease case (larger distance, larger g): g(d) = exp(14.77 + 9.17d)
@@ -65,7 +68,7 @@ for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
     out_image, out_transform = mask(src, [geom], crop=True)
     mean_value = np.nanmean(out_image)
-    average_decay.append({common_column: row['ADM2_FR'], 'Average_Decay': mean_value})
+    average_decay.append({zone: row[zone], province: row[province], 'Average_Decay': mean_value})
     decay = pd.DataFrame(average_decay)
 
 ### Normalize to between 0.95 and 0.05 - might need to be adjjsted as distances are not that big so undereporting might not be as severe and differences between areas is definitely not as severe
@@ -77,12 +80,12 @@ decay['Probability_underreporting'] = 0.05 + 0.9 * ((decay['Average_Decay'] - mi
 print(decay)
 
 ### Correct regional incidence data
-master_df_underreporting = master_df.merge(decay, on=common_column, how="left")
+master_df_underreporting = master_df.merge(decay, on=[zone, province], how="left")
 print(master_df_underreporting)
-print(master_df[[common_column, 'cases', 'deaths', 'Attack Rate']])
+print(master_df[[zone, province, 'cases', 'deaths', 'Attack Rate']])
 master_df_underreporting['cases'] = (master_df_underreporting['cases']/(1-master_df_underreporting['Probability_underreporting']))*1
 master_df_underreporting['deaths'] = (master_df_underreporting['deaths']/(1-master_df_underreporting['Probability_underreporting']))*1
 master_df_underreporting['Attack Rate'] = (master_df_underreporting['Attack Rate']/(1-master_df_underreporting['Probability_underreporting']))*1
-print(master_df_underreporting[[common_column, 'cases', 'deaths', 'Attack Rate']])
+print(master_df_underreporting[[zone, province, 'cases', 'deaths', 'Attack Rate']])
 
 master_df_underreporting.to_csv('underreporting_complete_dataset_df_'+temporal+'.csv', index=False)

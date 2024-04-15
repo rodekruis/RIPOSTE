@@ -43,10 +43,10 @@ time_periods = pd.DataFrame(data)
 # Administrative level SHP file
 admin_shp_path = "Administrative Boundaries\Health Boundaries\District_sante_2022.shp"
 full_admin_boundaries = gpd.read_file(admin_shp_path)
-admin_boundaries = full_admin_boundaries[[common_column, 'geometry']]
+admin_boundaries = full_admin_boundaries[['NOM_REGION', common_column, 'geometry']]
 print("Loaded admin boundaries")
 # Create master dataframe to store all the datasets
-index_columns = ['start_date', 'end_date', common_column]
+index_columns = ['start_date', 'end_date', common_column, 'NOM_REGION']
 master_df = pd.DataFrame(columns=index_columns)
 
 ### Functions
@@ -66,38 +66,47 @@ def gee_extraction(imageset, band):
     fc = ee.FeatureCollection(simplified_admin_boundaries.__geo_interface__)
     # Create an empty list for all the results to be appended to inside the for loop
     results = []
+    # Read processed dates from the printed CSV
+    processed_dates = set(pd.read_csv((str(band) + "_" + temporal + "_ADM2.csv"), usecols=['start_date', 'end_date']).apply(lambda row: f"{row['start_date']}_{row['end_date']}", axis=1).unique())
+    print(processed_dates)
     # Loop through spatial resolution dates
     for index, row in time_periods.iterrows():
         start_date = row['start_date']
         end_date = row['end_date']
-        print(start_date)
-        # Filter the image collection by date range and the desired band (dataset) within the image collection
-        filtered_collection = image_collection.select(band).filterDate(start_date, end_date)
-        # Iterate through each polygon in the shapefile
-        for polygon in fc.getInfo()['features']:
-            print(polygon['properties'][common_column])
-            # Extract the polygon geometry
-            geometry = ee.Geometry(polygon['geometry'])
-            # Calculate the mean value within the polygon
-            mean_value = filtered_collection.filterBounds(geometry).mean().reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=geometry,
-                scale=1,
-                bestEffort=True
-            )
-            # Append the result to the list
-            results.append({
-                'start_date': start_date,
-                'end_date': end_date,
-                'ADM1_FR': polygon['properties'][common_column],
-                band: mean_value.getNumber(band).getInfo()
-            })
-    # Create a Pandas DataFrame from the results
-    results_df = pd.DataFrame(results)
-    #Save the dataframe to csv to reduce the need to run this script connecting to GEE
-    results_df.to_csv((str(band)+"_"+temporal+"_ADM2.csv"), index=False, date_format='%Y-%m-%d')
+        identifier = f"{str(start_date).split()[0]}_{str(end_date).split()[0]}"
+        print(identifier)
+        if identifier not in processed_dates:
+            processed_dates.add(identifier)  # Mark the date range as processed
+            # Filter the image collection by date range and the desired band (dataset) within the image collection
+            filtered_collection = image_collection.select(band).filterDate(start_date, end_date)
+            # Iterate through each polygon in the shapefile
+            for polygon in fc.getInfo()['features']:
+                region_name = polygon['properties'][common_column]
+                print(region_name)
+                # Extract the polygon geometry
+                geometry = ee.Geometry(polygon['geometry'])
+                # Calculate the mean value within the polygon
+                mean_value = filtered_collection.filterBounds(geometry).mean().reduceRegion(
+                    reducer=ee.Reducer.mean(),
+                    geometry=geometry,
+                    scale=1,
+                    bestEffort=True
+                )
+                # Append the result to the list
+                results.append({
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'ADM1_FR': region_name,
+                    band: mean_value.getNumber(band).getInfo()
+                })
+
+            # Save the dataframe to csv in every time period loop (append mode)
+            results_df = pd.DataFrame(results)
+            results_df.to_csv((str(band) + "_" + temporal + "_ADM2.csv"), mode='a',
+                                   header=not os.path.exists((str(band) + "_" + temporal + "_ADM2.csv")),
+                                   index=False, date_format='%Y-%m-%d')
     print(results_df)
-    return(results_df)
+    return results_df
 
 def copy_temporal_resolution(df):
     # Match to temporal resolution
@@ -138,32 +147,34 @@ def normalize_by_pop(df, desired_column, column_to_normalize):
 ############################# Data Loading #################################
 ### Precipitation (GEE)
 # # Extract data from GEE
-precipitation_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'total_precipitation_sum')
+# precipitation_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'total_precipitation_sum')
 # After first GEE extraction, run this to only use the csv and no longer connect to GEE
-# precipitation_df = pd.read_csv(('total_precipitation_sum_'+temporal+'_districts.csv'), parse_dates=['start_date', 'end_date'])
+precipitation_df = pd.read_csv(('total_precipitation_sum_'+temporal+'_ADM2.csv'), parse_dates=['start_date', 'end_date'])
+precipitation_df = full_admin_boundaries.merge(precipitation_df, on=common_column, how="outer")
 # Add to master dataframe
 add_dataframe_to_master(precipitation_df)
 print("Collected precipitation")
 
-### Temperature (GEE)
-# # Extract data from GEE
-temperature_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'temperature_2m')
-# After first GEE extraction, run this to only use the csv and no longer connect to GEE
-# temperature_df = pd.read_csv('temperature_2m_'+temporal+'_districts.csv', parse_dates=['start_date', 'end_date'])
-# Add to master dataframe
-add_dataframe_to_master(temperature_df)
-print("Collected surface temperature")
+# ### Temperature (GEE)
+# # # Extract data from GEE
+# temperature_df = gee_extraction("ECMWF/ERA5_LAND/DAILY_AGGR", 'temperature_2m')
+# # After first GEE extraction, run this to only use the csv and no longer connect to GEE
+# # temperature_df = pd.read_csv('temperature_2m_'+temporal+'_ADM2.csv', parse_dates=['start_date', 'end_date'])
+# # Add to master dataframe
+# add_dataframe_to_master(temperature_df)
+# print("Collected surface temperature")
 
 ### Population Density (TIFF) - using point data from Meta (avg # of people per 30-meter grid tile in an amdin boundary); NB: could also use excel sheet from MinSanté which has all admin levels
 # Load data
 src = rasterio.open('Datasets_Directory/cmr_density_2020.tif')
 # Loop through admin areas and extract all values from the tif
 total_pop_density = []
+print(admin_boundaries)
 for index, row in admin_boundaries.iterrows():
     geom = row['geometry']
     out_image, out_transform = mask(src, [geom], crop=True)
     mean_value = np.nanmean(out_image)
-    total_pop_density.append({common_column: row[common_column], 'Pop_Density': mean_value})
+    total_pop_density.append({'NOM_REGION': row['NOM_REGION'], common_column: row[common_column], 'Pop_Density': mean_value})
     pop_density = pd.DataFrame(total_pop_density)
 # Align to desired temporal resolution
 pop_density_df = copy_temporal_resolution(pop_density)
@@ -184,7 +195,7 @@ for index, row in admin_boundaries.iterrows():
     buffered_geom = geom.buffer(buffer_distance)
     out_image, out_transform = mask(src, [buffered_geom], crop=True)
     mean_value = np.nanmean(out_image)
-    total_waterbodies.append({common_column: row['ADM1_FR'], 'Water_Bodies': mean_value})
+    total_waterbodies.append({'NOM_REGION': row['NOM_REGION'], common_column: row['DISTRICT_S'], 'Water_Bodies': mean_value})
 waterbodies = pd.DataFrame(total_waterbodies)
 # Align to desired temporal resolution
 waterbodies_df = copy_temporal_resolution(waterbodies)
