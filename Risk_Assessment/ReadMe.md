@@ -1,17 +1,15 @@
 # RIPOSTE
 
-Building a Standardised Risk Assessment Tool with Epidemiology Case Studies
+Scripts that complete a risk assessment for epidemiology case studies, specifically cholera in Cameroon and measles in DRC.
 
-This tool creates a risk map from cleaned indicator datasets. It follows the INFORM risk methodology to identify appropriate indicators, aggregate them to risk dimensions, and draw a risk map. Python was chosen for this tool because it is an all-in-one technology for data analysis. There is no need for using excel or QGIS. It also automates all the data manipultation steps needed within the methdology, allowing for easy data input and resolution changes.
+This folder contains 4 types of scripts:
+1. Data cleaning - datacleaning_cholera_Cameroon.py and datacleaning_measles_DRC.py
+3. Adjusting for underreporting - adjust_under-reporting_CholeraCameroon.py and adjust_under-reporting_MeaslesDRC.py
+4. Risk assessment - RiskAssessment_CholeraCameroon.py and RiskAssessment_MeaslesDRC.py
+5. Work in progress - the rest
 
-The script is currently filled with data for creating a risk map for cholera in Cameroon. In order to repeat this case study the datasets in <> need to be downloaded.
+The data cleaning scripts read in all the necessary data for the risk assessment and merge them to a common spatial and temporal resolution
 
-Table of Contents:
+The adjusting for underreporting scripts use distance from health care facilities to scale up the number of cases and deaths due to the concept of underreporting.
 
-1. Definitions
-2. Data Loading
-3. Data Merging
-4. Data Normalization
-5. Aggregation
-6. Risk Map Creation
-7. Predictive modelling
+The risk assessment scripts normalize the data and apply a weighting model in order to agreggate the indicators into a risk score and create risk maps.
