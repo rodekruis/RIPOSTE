@@ -122,13 +122,14 @@ def normalize_by_pop(df, desired_column, column_to_normalize):
 # summary_incidence = admin_boundaries.merge(filtered_data, on=common_column, how="left")
 # incidence = summary_incidence[['start_date', common_column, 'cases', 'deaths']]
 
+#incidence_data = pd.read_csv('Els/Incidence-Measles-DRC-2020-2023.csv')
 incidence_data = pd.read_csv('Els/Incidence-Measles-DRC-2020-2023.csv')
 incidence_data.rename(columns={'PROV': province, 'ZS': zone, 'TOTALCAS':'cases', 'TOTALDECES':'deaths', 'DEBUTSEM':'start_date'}, inplace=True) # Fix the naming of columns
 incidence_data['start_date'] = pd.to_datetime(incidence_data['start_date'], format="%d/%m/%Y")
 # Make all admin names upper case to match other dataset inputs
 incidence_data[zone] = incidence_data[zone].str.upper()
 incidence_data[province] = incidence_data[province].str.upper()
-# Filter rows in filtered_data that have common values in common_column with admin_boundaries
+# Filter rows in filtered_data that have common values in common_column with admin_boundaries -> missing ~ 18 zones incidence data
 filtered_data = incidence_data[incidence_data[[province, zone]].apply(tuple, axis=1).isin(admin_boundaries[[province, zone]].apply(tuple, axis=1))]
 # Merge admin_boundaries with filtered_data
 summary_incidence = admin_boundaries.merge(filtered_data, on=[province, zone], how="left")
@@ -361,6 +362,11 @@ temp_malnourished = copy_temporal_resolution(malnourished)
 add_dataframe_to_master(temp_malnourished)
 print(temp_malnourished)
 print("Collected malnutrition data")
+
+### Precipitation (CDS)
+
+
+### Temperature (CDS)
 
 #################### Finished collecting datasets #######################
 # Remove time periods that are missing incidence dat
